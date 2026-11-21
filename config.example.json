@@ -1,0 +1,20 @@
+{
+  "site": {
+    "hosts": ["localhost", "127.0.0.1"],
+    "origins": ["http://localhost:7690", "http://127.0.0.1:7690"],
+    "devices": []
+  },
+  "rooms": {
+    "clients": {
+      "claude": ["claude"],
+      "codex": ["codex"],
+      "agy": ["agy"],
+      "grok": ["grok"],
+      "shell": []
+    }
+  },
+  "commands": [
+    {"id": "compact", "label": "Compact", "text": "/compact"},
+    {"id": "clear", "label": "Clear", "text": "/clear"}
+  ]
+}

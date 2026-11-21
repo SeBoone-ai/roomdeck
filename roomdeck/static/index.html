@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+<title>RoomDeck</title>
+<script>
+const params = new URLSearchParams(location.search);
+document.documentElement.classList.toggle('mobile-mode', params.get('mobile') === '1' || matchMedia('(max-width: 699px)').matches);
+document.documentElement.classList.toggle('embed-mode', params.get('embed') === '1');
+</script>
+<link rel="stylesheet" href="static/deck.css?v=1">
+<meta name="theme-color" content="#0e1524">
+</head>
+<body>
+<div id="app">
+  <aside id="side">
+    <section id="usage-sec" class="sec"><div class="sec-title">USAGE</div><div id="usage"></div></section>
+    <div id="usage-resizer" class="sec-resizer"></div>
+    <div id="middle">
+      <div class="sec-title">ROOMS</div>
+      <div class="view" id="v-room"></div>
+    </div>
+    <section id="load-sec" class="sec"><div class="sec-title">MACHINE</div><div id="load"></div></section>
+    <section id="view"><span>Text</span><button id="fs-down">−</button><span id="fs-base"></span><button id="fs-up">＋</button><select id="theme-select" aria-label="Theme"></select></section>
+  </aside>
+  <div id="side-resizer"></div>
+  <main id="panes"></main>
+</div>
+<dialog id="new-dialog">
+  <form method="dialog" id="new-form">
+    <label>Client <select name="client"></select></label>
+    <label>Directory <select name="dir"></select></label>
+    <div id="dir-browser" hidden>
+      <div id="dir-path"></div>
+      <div id="dir-list"></div>
+    </div>
+    <label>Room Name <input name="name" maxlength="60" autocomplete="off"></label>
+    <div class="row">
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button value="ok" class="primary">Open</button>
+    </div>
+    <div id="new-error" class="warn"></div>
+  </form>
+</dialog>
+<script src="static/themes.js?v=1"></script>
+<script src="static/deck.js?v=1"></script>
+</body>
+</html>
