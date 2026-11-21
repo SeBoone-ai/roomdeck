@@ -68,6 +68,21 @@ Copy `config.example.json` to `~/.config/roomdeck/config.json` and customize:
 
 - `rooms.clients`: Keep or add the user's preferred CLIs and flags (e.g. `{"claude": ["claude"], "shell": []}`).
 - `commands`: Customize the bottom toolbar shortcut buttons (each entry has `id`, `label`, `text`).
+- `usage_url` / `usage_file` (optional): Populate the left-sidebar **AGENT STATUS** quota meter from a local loopback JSON endpoint (`http://127.0.0.1:<port>/...`) or a local JSON file (default `~/.local/state/roomdeck/agent-status.json`). Schema:
+  ```json
+  {
+    "agents": [
+      {
+        "label": "Claude",
+        "ok": true,
+        "windows": [
+          {"win": "5h", "pct": 24, "reset": 1800000000},
+          {"win": "7d", "pct": 18, "reset": 1800500000}
+        ]
+      }
+    ]
+  }
+  ```
 - `site`: Keep `hosts` and `origins` restricted to `localhost` / `127.0.0.1` unless configuring a reverse proxy (see Step 4).
 
 Environment variables (all optional):

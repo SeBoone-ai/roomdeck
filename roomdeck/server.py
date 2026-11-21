@@ -385,12 +385,7 @@ def machine_load():
     return readings
 
 
-def usage():
-    url = config().get("usage_url")
-    if not isinstance(url, str) or not url.startswith("http://127.0.0.1:"):
-        raise OSError("no usage monitor configured")
-    with urllib.request.urlopen(url, timeout=3) as response:
-        data = json.load(response)
+def _format_usage(data):
     agents = [
         {
             "label": a.get("label", ""),
@@ -404,6 +399,19 @@ def usage():
         for a in data.get("agents", [])
     ]
     return {"agents": agents}
+
+
+def usage():
+    cfg = config()
+    url = cfg.get("usage_url")
+    if isinstance(url, str) and url.startswith(("http://127.0.0.1:", "http://localhost:")):
+        with urllib.request.urlopen(url, timeout=3) as response:
+            return _format_usage(json.load(response))
+    raw_file = cfg.get("usage_file")
+    path = Path(raw_file).expanduser() if isinstance(raw_file, str) and raw_file else room.state_dir() / "agent-status.json"
+    if path.is_file():
+        return _format_usage(json.loads(path.read_text(encoding="utf-8")))
+    return {"agents": []}
 
 
 def image_kind(head):
