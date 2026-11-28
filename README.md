@@ -6,14 +6,14 @@ A lightweight, zero-dependency browser deck for running multiple AI CLIs (`Claud
 
 - **Zero external dependencies**: Python 3 standard library + Vanilla HTML/JS/CSS + `tmux` only. No `npm`, no `pip`, no `ttyd`.
 - **Built for AI-assisted workflows**:
-  - Multi-pane split layout + single-pane mobile mode (`?mobile=1`) + single-pane embed mode (`?embed=1&room=<name>`).
-  - Native browser scrollback & text selection with auto-copy (`✂` toast) and intelligent line-wrap joining.
-  - Clickable approval & choice menus (`yes`/`no`/`1–5` toolbar + direct click on terminal choices).
+  - Multi-pane split layout + single-pane mobile mode (`?mobile=1`, with an arrow/`Esc`/`Enter` keypad toggle in the bottom toolbar and a selectable **Menu** pane in the room dropdown) + single-pane embed mode (`?embed=1&room=<name>`).
+  - Native browser scrollback & text selection with auto-copy (`✂` toast), narrow-pane line-wrap joining, and width-independent wrapped URL linking/copying (OSC 8, ANSI underline, and heuristic continuation).
+  - Clickable approval & choice menus (`yes`/`no`/`1–5` toolbar + direct click on terminal choices) and an optional Web Audio attention chime (`🔔`/`🔕` toggle) when any room requests approval or the `main` room finishes a turn.
   - Auto-folding of internal agent messages and tool logs, plus user prompt highlighting.
   - Drag-and-drop images/files directly into the active session.
   - 8 built-in themes (`Navy`, `Light`, `Black`, `Tokyo Night`, `Catppuccin Mocha`, `Nord`, `Solarized Dark`, `Warm Paper`).
 
-> **日本語概要**: Python 3 標準ライブラリ＋素の HTML/JS/CSS＋`tmux` だけで動く、複数 AI CLI 並列運用向けの軽量 Web デッキです。まずは下の1行をあなたの AI エージェントに渡してセットアップを任せてください。
+> **日本語概要**: Python 3 標準ライブラリ＋素の HTML/JS/CSS＋`tmux` だけで動く、複数 AI CLI 並列運用向けの軽量 Web デッキです。まずは下のプロンプトをあなたの AI エージェントに渡してセットアップを任せてください。
 
 ## Quick Start (Hand This to Your AI Agent)
 
@@ -31,7 +31,7 @@ Read https://github.com/SeBoone-ai/roomdeck (or this local repo) and set up room
 
 ### Option B: No Git Required (Download ZIP)
 
-Don't use `git`? Download the ZIP directly, unzip it, and hand the folder to your AI agent:
+Don't use `git`? Download the ZIP directly, unzip it, open the folder in your AI agent, and ask it: `"Read README.md in this folder and set up roomdeck for my environment."`
 
 - **Latest ZIP (1-click)**: https://github.com/SeBoone-ai/roomdeck/archive/refs/heads/main.zip
 - **Releases**: https://github.com/SeBoone-ai/roomdeck/releases
@@ -58,7 +58,12 @@ If you are an AI agent setting up `roomdeck` for the user, follow these steps in
   - **Do NOT rewrite `roomdeck` for native Windows.** It relies on `tmux` and POSIX PTYs.
   - Check whether WSL2 is already installed (`wsl --status` in PowerShell, or check if running inside WSL).
   - If WSL2 is not installed, ask the user to run `wsl --install` in an elevated PowerShell, reboot, and enter the distro (`wsl -d Ubuntu`), then run setup inside WSL2 Ubuntu.
-  - To use `systemd --user` inside WSL2, ensure `/etc/wsl.conf` has `[boot]\nsystemd=true` (restart with `wsl --shutdown` if newly added).
+  - To use `systemd --user` inside WSL2, ensure `/etc/wsl.conf` contains:
+    ```ini
+    [boot]
+    systemd=true
+    ```
+    (restart with `wsl --shutdown` if newly added).
 
 ### 2. Clone, Inspect Installed AI CLIs & Write `~/.config/roomdeck/config.json`
 
@@ -126,7 +131,7 @@ To run `roomdeck` persistently in the background, resolve absolute paths (`REPO_
   Enable and start: `systemctl --user daemon-reload && systemctl --user enable --now roomdeck.service` (on headless Linux, also run `loginctl enable-linger "$USER"`).
 
 - **macOS (`launchd`)**:
-  Create `~/Library/LaunchAgents/com.roomdeck.server.plist` with `<key>ProgramArguments</key>` as an array (`[<PYTHON_BIN>, "-m", "roomdeck.server"]`), `<key>WorkingDirectory</key>` set to `<REPO_DIR>`, and `<key>EnvironmentVariables</key>` setting `PATH` so Homebrew `tmux` and user CLIs are found (handles both Apple Silicon `/opt/homebrew/bin` and Intel `/usr/local/bin`). Load with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.roomdeck.server.plist`.
+  Create `~/Library/LaunchAgents/com.roomdeck.server.plist` with `<key>ProgramArguments</key>` as an array (`[<PYTHON_BIN>, "-m", "roomdeck.server"]`), `<key>WorkingDirectory</key>` set to `<REPO_DIR>`, `<key>EnvironmentVariables</key>` setting `PATH` so Homebrew `tmux` and user CLIs are found (handles both Apple Silicon `/opt/homebrew/bin` and Intel `/usr/local/bin`), `<key>RunAtLoad</key><true/>`, and `<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>`. Load with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.roomdeck.server.plist`.
 
 ### 4. Safe Remote Access (Phone / Tablet)
 

@@ -9,7 +9,7 @@ const params = new URLSearchParams(location.search);
 document.documentElement.classList.toggle('mobile-mode', params.get('mobile') === '1' || matchMedia('(max-width: 699px)').matches);
 document.documentElement.classList.toggle('embed-mode', params.get('embed') === '1');
 </script>
-<link rel="stylesheet" href="static/deck.css?v=1">
+<link rel="stylesheet" href="static/deck.css?v=2">
 <meta name="theme-color" content="#0e1524">
 </head>
 <body>
@@ -22,7 +22,7 @@ document.documentElement.classList.toggle('embed-mode', params.get('embed') === 
       <div class="view" id="v-room"></div>
     </div>
     <section id="load-sec" class="sec"><div class="sec-title">MACHINE</div><div id="load"></div></section>
-    <section id="view"><span>Text</span><button id="fs-down">−</button><span id="fs-base"></span><button id="fs-up">＋</button><select id="theme-select" aria-label="Theme"></select></section>
+    <section id="view"><span>Text</span><button id="fs-down">−</button><span id="fs-base"></span><button id="fs-up">＋</button><button id="sound-toggle" title="Attention sound"></button><select id="theme-select" aria-label="Theme"></select></section>
   </aside>
   <div id="side-resizer"></div>
   <main id="panes"></main>
@@ -44,6 +44,6 @@ document.documentElement.classList.toggle('embed-mode', params.get('embed') === 
   </form>
 </dialog>
 <script src="static/themes.js?v=1"></script>
-<script src="static/deck.js?v=1"></script>
+<script src="static/deck.js?v=2"></script>
 </body>
 </html>
