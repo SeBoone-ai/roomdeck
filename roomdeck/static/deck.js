@@ -1,16 +1,27 @@
 'use strict';
 
 const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦\u{1F300}-\u{1F64F}\u{1F900}-\u{1F9FF}\u{20000}-\u{3FFFD}]/u;
-const ESC = /\x1b\[([0-9;:?<>=]*)[ -/]*([@-~])|\x1b\][\s\S]*?(?:\x07|\x1b\\)|\x1b[P^_][\s\S]*?\x1b\\|\x1b[@-Z\\-_]|[\x00-\x08\x0b-\x1f\x7f]/g;
-const URL_RE = /https?:\/\/[^\s"'<>`]+/g;
+const ESC = /\x1b\[([0-9;:?<>=]*)[ -/]*([@-~])|\x1b\]([\s\S]*?)(?:\x07|\x1b\\)|\x1b[P^_][\s\S]*?\x1b\\|\x1b[@-Z\\-_]|[\x00-\x08\x0b-\x1f\x7f]/g;
+const URL_RE = /https?:\/\/[^\s"'<>`\u3000-\u303f\uff00-\uffef]+/g;
 const KEYMAP = {
   Escape: 'Escape', Backspace: 'BSpace', Delete: 'DC', ArrowUp: 'Up', ArrowDown: 'Down',
   ArrowLeft: 'Left', ArrowRight: 'Right', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
 };
+const ICONS = {
+  dpad: '<path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>',
+};
+function iconButton(paths, title) {
+  const b = el('button', 'icon-btn');
+  b.title = title;
+  b.setAttribute('aria-label', title);
+  b.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+  return b;
+}
 const CLIENT_LABELS = { claude: 'Claude', codex: 'Codex', agy: 'Antigravity', grok: 'Grok', shell: 'Shell' };
 const RENAME = '__rename';
+const MENU_OPTION = '__menu';
 const STATE_LABELS = { working: 'Working', input: 'Input', approval: 'Approval', standby: 'Idle', ended: 'Ended', unknown: 'Unknown' };
-const BASE = { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, inverse: false };
+const BASE = { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, inverse: false, oscUrl: null };
 const HISTORY_STEP = 500;
 const HISTORY_MAX = 2000;
 const NARROW = 700;
@@ -62,6 +73,11 @@ function cellWidth(ch) { return WIDE.test(ch) ? 2 : 1; }
 function textWidth(s) { let w = 0; for (const ch of s) w += cellWidth(ch); return w; }
 
 const NEW_BLOCK_RE = /^(?:[-*+•◦▪▸▹►●○]\s|\d+[.)]\s|#{1,6}\s|[>$│╭╰┌└├┤┬┴┼])/;
+const DIVIDER_RE = /^[─━═\-=_*]{10,}$/;
+const URL_END_PUNCT_RE = /[。、．，）」』】〉》〕］｝・：；！？,;:!?]$/;
+const URL_CONT_RE = /^[^\s"'<>`\u3000-\u303f\u3040-\u30ff\u3400-\u9fff\uff00-\uffef]+/;
+const URL_TRAILING_RE = /https?:\/\/[^\s"'<>`\u3000-\u303f\uff00-\uffef]+$/;
+const URL_TLD_RE = /^(?:com|net|org|jp|io|dev|app|ai|co|uk|de|fr|us|edu|gov|me|tv|gg|xyz|info|biz|site|online|cloud|page|link|work|tech|tools)$/i;
 
 function leadingSpaces(s) {
   let n = 0;
@@ -69,13 +85,96 @@ function leadingSpaces(s) {
   return n;
 }
 
+function trimUrlEnd(raw) {
+  let s = raw;
+  while (s.length > 8) {
+    if (URL_END_PUNCT_RE.test(s) || s.endsWith('.')) { s = s.slice(0, -1); continue; }
+    const last = s[s.length - 1];
+    if (last === ')' && (s.split('(').length - 1) < (s.split(')').length - 1)) { s = s.slice(0, -1); continue; }
+    if (last === ']' && (s.split('[').length - 1) < (s.split(']').length - 1)) { s = s.slice(0, -1); continue; }
+    if (last === '}' && (s.split('{').length - 1) < (s.split('}').length - 1)) { s = s.slice(0, -1); continue; }
+    break;
+  }
+  return s;
+}
+
+function urlContinuation(prevFull, prevUrl, nextFull, cols, peerMax = 0, ansiUnderlineCont = false) {
+  if (!prevFull || !prevUrl || !nextFull) return null;
+  const nextTrim = nextFull.trimStart();
+  if (!nextTrim || /^https?:\/\//i.test(nextTrim) || NEW_BLOCK_RE.test(nextTrim)) return null;
+  if (/[)\]}>"'`。、）」』】]$/.test(prevUrl)) return null;
+  const m = nextTrim.match(URL_CONT_RE);
+  if (!m) return null;
+  const cont = m[0];
+  const prevIndent = leadingSpaces(prevFull);
+  const nextIndent = leadingSpaces(nextFull);
+  if (nextIndent !== 0 && nextIndent !== prevIndent && !(nextIndent > prevIndent && nextIndent <= prevIndent + 6)) {
+    return null;
+  }
+  if (ansiUnderlineCont) return { indent: nextIndent, raw: cont };
+  const width = textWidth(prevFull);
+  const firstChar = cont[0] || '';
+  const looksLikeProseWord = /^[A-Z][a-z]+(?:\s|$)/.test(nextTrim);
+  const contHasUrlPunct = /[/?&=#.%_-]/.test(cont);
+  const hardEdgeWrap = cols > 0 && width + cellWidth(firstChar) > cols;
+  const softMarginWrap = cols > 0 && width >= Math.max(30, cols - 8) && !looksLikeProseWord
+    && (nextIndent > 0 || !/\s/.test(nextTrim) || contHasUrlPunct);
+  const peerWrap = peerMax >= 40 && width >= peerMax - 4 && width <= peerMax + 4 && !looksLikeProseWord
+    && (!/\s/.test(nextTrim) || contHasUrlPunct);
+  const hostPart = prevUrl.replace(/^https?:\/\//i, '');
+  const hasPathInPrev = /^https?:\/\/[^/?#]+\//.test(prevUrl);
+  const incompleteHost = !/[/?#]/.test(hostPart) && !hostPart.includes('.') && /^[.a-z0-9-]/i.test(cont);
+  const brokenDot = prevUrl.endsWith('.') && /^[a-z0-9]/.test(cont) && !/^[a-z]+:$/.test(cont)
+    && (hardEdgeWrap || softMarginWrap || peerWrap || contHasUrlPunct || URL_TLD_RE.test(cont));
+  const brokenMid = /(?:\/\/|[:?&=%_~+-])$/.test(prevUrl);
+  const contPrefix = /^[/?&=#.%]/.test(cont);
+  const brokenSlash = prevUrl.endsWith('/') && (contHasUrlPunct || /^\d+$/.test(cont));
+  const urlPathCont = hasPathInPrev && !/^[A-Z][a-z]+:$/.test(cont)
+    && (/[/?&=#%]/.test(cont) || (/[A-Za-z]/.test(cont) && /\d/.test(cont)) || /[a-z][A-Z]|[A-Z]{2,}|[_-]/.test(cont));
+  if (!hardEdgeWrap && !softMarginWrap && !peerWrap && !incompleteHost && !brokenDot && !brokenMid && !contPrefix && !brokenSlash && !urlPathCont) {
+    return null;
+  }
+  return { indent: nextIndent, raw: cont };
+}
+
 function joinSelectedLines(pieces, cols) {
   if (!pieces.length) return '';
+  let max1 = 0, max2 = 0;
+  for (const p of pieces) {
+    const trimmed = (p.full || '').trim();
+    if (!trimmed || DIVIDER_RE.test(trimmed)) continue;
+    const w = textWidth(p.full || '');
+    if (w > max1) { max2 = max1; max1 = w; }
+    else if (w > max2) { max2 = w; }
+  }
+  const peerMax = max2 >= 40 ? max2 : 0;
   let text = pieces[0].part;
+  let activeUrl = (pieces[0].full.match(URL_TRAILING_RE) || [null])[0];
   for (let i = 1; i < pieces.length; i++) {
-    const up = pieces[i - 1].full, cur = pieces[i];
+    const prev = pieces[i - 1], cur = pieces[i];
+    const up = prev.full;
     const curTrim = cur.full.trimStart();
-    if (!up || !curTrim) { text += `\n${cur.part}`; continue; }
+    if (!up || !curTrim || DIVIDER_RE.test(up.trim()) || DIVIDER_RE.test(curTrim)) {
+      text += `\n${cur.part}`;
+      activeUrl = (cur.full.match(URL_TRAILING_RE) || [null])[0];
+      continue;
+    }
+    if (prev.urlGroupEnd && prev.urlGroupEnd === cur.urlGroupStart) {
+      const tail = cur.part.replace(/^\s+/, '');
+      text += tail;
+      activeUrl = activeUrl ? activeUrl + tail : (cur.full.match(URL_TRAILING_RE) || [null])[0];
+      continue;
+    }
+    if (activeUrl) {
+      const cont = urlContinuation(up, activeUrl, cur.full, cols, peerMax);
+      if (cont) {
+        const tail = cur.part.replace(/^\s+/, '');
+        text += tail;
+        activeUrl = (cont.indent + cont.raw.length >= cur.full.length) ? activeUrl + cont.raw : null;
+        continue;
+      }
+    }
+    activeUrl = (cur.full.match(URL_TRAILING_RE) || [null])[0];
     const width = textWidth(up);
     const firstChar = [...curTrim][0] || '';
     if (cols > 0 && width + cellWidth(firstChar) > cols) {
@@ -88,9 +187,9 @@ function joinSelectedLines(pieces, cols) {
       for (const p of pieces) {
         if (p.full && leadingSpaces(p.full) === upIndent) blockMax = Math.max(blockMax, textWidth(p.full));
       }
-      if (blockMax >= 60 && (cols <= 0 || blockMax < cols)) {
+      if (blockMax >= 36 && (cols <= 0 || blockMax <= cols)) {
         const tail = cur.part.replace(/^\s+/, '');
-        if (width + cellWidth(firstChar) > blockMax) {
+        if (blockMax >= 48 && width + cellWidth(firstChar) > blockMax) {
           text += tail;
           continue;
         }
@@ -130,7 +229,7 @@ function applySgr(st, params) {
       }
       if (col === 'var(--c8)' && c === 48) col = 'var(--c8bg, var(--c8))';
       if (col) st[c === 38 ? 'fg' : 'bg'] = col;
-    } else if (c === 0) Object.assign(st, BASE);
+    } else if (c === 0) { const keepOsc = st.oscUrl; Object.assign(st, BASE); st.oscUrl = keepOsc; }
     else if (c === 1) st.bold = true;
     else if (c === 2) st.dim = true;
     else if (c === 3) st.italic = true;
@@ -159,6 +258,13 @@ function parseLine(raw, st) {
   while ((m = ESC.exec(raw))) {
     push(raw.slice(last, m.index));
     if (m[2] === 'm' && m[1] !== undefined && !/[?<>=]/.test(m[1])) applySgr(st, m[1]);
+    else if (m[3] !== undefined && m[3].startsWith('8;')) {
+      const sep = m[3].indexOf(';', 2);
+      if (sep >= 0) {
+        const u = m[3].slice(sep + 1);
+        st.oscUrl = /^https?:\/\/[^\s"'<>`]+$/.test(u) ? u : null;
+      }
+    }
     last = ESC.lastIndex;
   }
   push(raw.slice(last));
@@ -208,22 +314,33 @@ function renderLine(line, segs, agyUser = false) {
   for (const s of segs) {
     let fg = s.st.fg, bg = s.st.bg;
     if (s.st.inverse) [fg, bg] = [bg || 'var(--bg)', fg || 'var(--fg)'];
-    if (!fg && !bg && !s.st.bold && !s.st.dim && !s.st.italic && !s.st.underline) { appendText(line, s.text); continue; }
-    const span = el('span', bg ? 'b' : '');
-    if (fg) span.style.color = fg;
-    if (bg) span.style.background = bg;
-    if (s.st.bold) span.style.fontWeight = 'bold';
-    if (s.st.dim) span.style.opacity = 'var(--dim, .6)';
-    if (s.st.italic) span.style.fontStyle = 'italic';
-    if (s.st.underline) span.style.textDecoration = 'underline';
-    appendText(span, s.text);
-    line.appendChild(span);
+    if (!s.st.oscUrl && !fg && !bg && !s.st.bold && !s.st.dim && !s.st.italic && !s.st.underline) { appendText(line, s.text); continue; }
+    const node = s.st.oscUrl ? el('a', bg ? 'u b' : 'u') : el('span', bg ? 'b' : '');
+    if (s.st.oscUrl) {
+      node.dataset.oscUrl = s.st.oscUrl;
+      node.dataset.url = s.st.oscUrl;
+      node.href = s.st.oscUrl;
+      node.target = '_blank';
+      node.rel = 'noopener';
+    }
+    if (fg) node.style.color = fg;
+    if (bg) node.style.background = bg;
+    if (s.st.bold) node.style.fontWeight = 'bold';
+    if (s.st.dim) node.style.opacity = 'var(--dim, .6)';
+    if (s.st.italic) node.style.fontStyle = 'italic';
+    if (s.st.underline) {
+      node.style.textDecoration = 'underline';
+      node.dataset.uStyle = '1';
+    }
+    appendText(node, s.text);
+    line.appendChild(node);
   }
   linkify(line);
 }
 
 function renderParsedLines(rawLines, { agy = false, agyLimit = rawLines.length, keys = null, getLine }) {
   let inAgyUser = false;
+  let dirty = false;
   const st = { ...BASE };
   rawLines.forEach((raw, i) => {
     const startSt = keys ? JSON.stringify(st) : '';
@@ -234,8 +351,10 @@ function renderParsedLines(rawLines, { agy = false, agyLimit = rawLines.length, 
       if (keys[i] === key) return;
       keys[i] = key;
     }
+    dirty = true;
     renderLine(getLine(i), segs, inAgyUser);
   });
+  return dirty;
 }
 
 function bindPointerDrag(target, onStart) {
@@ -310,7 +429,12 @@ function applyNoiseFolds(container, openSet) {
 function linkify(line) {
   const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
   const nodes = [];
-  while (walker.nextNode()) if (walker.currentNode.data.includes('http')) nodes.push(walker.currentNode);
+  while (walker.nextNode()) {
+    const tn = walker.currentNode;
+    if (!tn.data.includes('http')) continue;
+    if (tn.parentElement && typeof tn.parentElement.closest === 'function' && tn.parentElement.closest('a.u')) continue;
+    nodes.push(tn);
+  }
   for (const node of nodes) {
     const parts = [];
     let last = 0, m;
@@ -324,6 +448,196 @@ function linkify(line) {
     if (!parts.length) continue;
     parts.push(document.createTextNode(node.data.slice(last)));
     node.replaceWith(...parts);
+  }
+}
+
+let urlGroupSeq = 0;
+
+function resetLinkify(line) {
+  if (typeof line.querySelectorAll !== 'function') return false;
+  const links = line.querySelectorAll('a.u');
+  if (!links.length) return false;
+  let removed = false;
+  for (const a of links) {
+    if (a.dataset && a.dataset.oscUrl) {
+      delete a.dataset.urlGroup;
+      delete a.dataset.urlCont;
+      continue;
+    }
+    const parent = a.parentNode;
+    if (!parent) continue;
+    while (a.firstChild) parent.insertBefore(a.firstChild, a);
+    a.remove();
+    removed = true;
+  }
+  if (removed && typeof line.normalize === 'function') line.normalize();
+  return removed;
+}
+
+function hasAnsiUnderline(node) {
+  let cur = node;
+  while (cur && cur.nodeType) {
+    if (cur.nodeType === 1 && cur.dataset && cur.dataset.uStyle === '1') return true;
+    cur = cur.parentNode;
+  }
+  return false;
+}
+
+function hasAnsiUnderlineAt(line, offset) {
+  const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+  let pos = 0;
+  while (walker.nextNode()) {
+    const tn = walker.currentNode;
+    const len = tn.data.length;
+    if (offset >= pos && offset < pos + len) return hasAnsiUnderline(tn.parentElement);
+    pos += len;
+  }
+  return false;
+}
+
+function trailingTextAfter(line, node) {
+  const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+  let seen = false;
+  let out = '';
+  while (walker.nextNode()) {
+    const cur = walker.currentNode;
+    if (node.contains(cur)) { seen = true; continue; }
+    if (seen) out += cur.data;
+  }
+  return out;
+}
+
+function wrapLineRangeAsLink(line, startOffset, length) {
+  for (const existing of [...line.querySelectorAll('a.u')]) {
+    if (existing.dataset.url) continue;
+    const parent = existing.parentNode;
+    if (!parent) continue;
+    while (existing.firstChild) parent.insertBefore(existing.firstChild, existing);
+    existing.remove();
+  }
+  if (typeof line.normalize === 'function') line.normalize();
+  const created = [];
+  const endOffset = startOffset + length;
+  const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+  const ops = [];
+  let pos = 0;
+  while (walker.nextNode()) {
+    const tn = walker.currentNode;
+    const len = tn.data.length;
+    const lo = Math.max(0, startOffset - pos);
+    const hi = Math.min(len, endOffset - pos);
+    if (lo < hi) ops.push({ tn, lo, hi });
+    pos += len;
+    if (pos >= endOffset) break;
+  }
+  for (const { tn, lo, hi } of ops) {
+    const parts = [];
+    if (lo > 0) parts.push(document.createTextNode(tn.data.slice(0, lo)));
+    const a = el('a', 'u', tn.data.slice(lo, hi));
+    a.dataset.urlCont = '1';
+    parts.push(a);
+    created.push(a);
+    if (hi < tn.data.length) parts.push(document.createTextNode(tn.data.slice(hi)));
+    tn.replaceWith(...parts);
+  }
+  linkify(line);
+  return created;
+}
+
+function trimAnchorsEnd(anchors, trimChars) {
+  let rem = trimChars;
+  while (rem > 0 && anchors.length) {
+    const a = anchors[anchors.length - 1];
+    const txt = a.textContent || '';
+    if (rem >= txt.length) {
+      rem -= txt.length;
+      a.replaceWith(document.createTextNode(txt));
+      anchors.pop();
+    } else {
+      a.textContent = txt.slice(0, txt.length - rem);
+      a.after(document.createTextNode(txt.slice(txt.length - rem)));
+      rem = 0;
+    }
+  }
+}
+
+function linkifyContainer(container, cols) {
+  if (!container || !container.children || !container.children.length) return;
+  const rows = [...container.children];
+  let max1 = 0, max2 = 0;
+  for (const ln of rows) {
+    const full = (ln.textContent || '').trimEnd();
+    const trimmed = full.trim();
+    if (!trimmed || DIVIDER_RE.test(trimmed)) continue;
+    const w = textWidth(full);
+    if (w > max1) { max2 = max1; max1 = w; }
+    else if (w > max2) { max2 = w; }
+  }
+  const peerMax = max2 >= 40 ? max2 : 0;
+  for (const ln of rows) {
+    if (resetLinkify(ln)) linkify(ln);
+  }
+  for (let i = 0; i < rows.length; i++) {
+    const ln = rows[i];
+    if (typeof ln.querySelectorAll !== 'function') continue;
+    const anchors = [...ln.querySelectorAll('a.u')];
+    for (const a of anchors) {
+      if (a.dataset.oscUrl) {
+        if (a.dataset.urlGroup) continue;
+        if (!trailingTextAfter(ln, a).trim()) {
+          const oscGroup = [a];
+          let curRowIdx = i;
+          while (curRowIdx + 1 < rows.length) {
+            const nextLn = rows[curRowIdx + 1];
+            if (typeof nextLn.querySelectorAll !== 'function') break;
+            const nextLinks = [...nextLn.querySelectorAll('a.u')].filter(x => x.dataset.oscUrl === a.dataset.oscUrl);
+            if (!nextLinks.length) break;
+            const nextLead = (nextLn.textContent || '').trimStart();
+            if (!nextLead.startsWith(nextLinks[0].textContent || '')) break;
+            for (const nl of nextLinks) { nl.dataset.urlCont = '1'; oscGroup.push(nl); }
+            curRowIdx += 1;
+            if (trailingTextAfter(nextLn, nextLinks[nextLinks.length - 1]).trim()) break;
+          }
+          if (oscGroup.length > 1) {
+            const gid = String(++urlGroupSeq);
+            for (const segA of oscGroup) segA.dataset.urlGroup = gid;
+          }
+        }
+        continue;
+      }
+      if (a.dataset.url) continue;
+      const group = [a];
+      let rawFull = a.textContent || '';
+      if (!trailingTextAfter(ln, a).trim()) {
+        let curRowIdx = i;
+        while (curRowIdx + 1 < rows.length) {
+          const prevFull = (rows[curRowIdx].textContent || '').trimEnd();
+          const nextFull = (rows[curRowIdx + 1].textContent || '').trimEnd();
+          const nextIndent = leadingSpaces(nextFull);
+          const ansiU = hasAnsiUnderline(group[group.length - 1]) && hasAnsiUnderlineAt(rows[curRowIdx + 1], nextIndent);
+          const cont = urlContinuation(prevFull, rawFull, nextFull, cols, peerMax, ansiU);
+          if (!cont) break;
+          const added = wrapLineRangeAsLink(rows[curRowIdx + 1], cont.indent, cont.raw.length);
+          if (!added.length) break;
+          group.push(...added);
+          rawFull += cont.raw;
+          curRowIdx += 1;
+          if (cont.indent + cont.raw.length < nextFull.length) break;
+        }
+      }
+      const trimmed = trimUrlEnd(rawFull);
+      const cut = rawFull.length - trimmed.length;
+      if (cut > 0) trimAnchorsEnd(group, cut);
+      if (!group.length || !/^https?:\/\//.test(trimmed)) continue;
+      const groupId = group.length > 1 ? String(++urlGroupSeq) : '';
+      for (const segA of group) {
+        segA.dataset.url = trimmed;
+        segA.href = trimmed;
+        segA.target = '_blank';
+        segA.rel = 'noopener';
+        if (groupId) segA.dataset.urlGroup = groupId;
+      }
+    }
   }
 }
 
@@ -399,6 +713,8 @@ class Pane {
   constructor(deck) {
     this.deck = deck;
     this.room = null;
+    this.isMenuPane = false;
+    this.wantedMenu = false;
     this.raw = [];
     this.keys = [];
     this.histLines = 0;
@@ -443,6 +759,8 @@ class Pane {
     this.ime.setAttribute('spellcheck', 'false');
     this.measure = el('span', 'measure', 'MMMMMMMMMM');
     this.chooser = el('div', 'chooser');
+    this.menuSlot = el('div', 'menu-slot');
+    this.menuSlot.hidden = true;
     this.toastEl = el('div', 'toast', '✂');
     this.toastEl.setAttribute('aria-label', 'Copied');
     this.answers = el('div', 'answers');
@@ -455,10 +773,27 @@ class Pane {
       this.choices.append(b);
     }
     this.cmdBar = el('span', 'choices');
-    this.answers.append(this.choices, el('span', 'grow'), this.cmdBar);
+    this.navToggleBtn = iconButton(ICONS.dpad, 'Arrow keys');
+    this.navToggleBtn.classList.add('nav-toggle');
+    this.navKeys = el('span', 'nav-keys');
+    this.navKeys.hidden = true;
+    for (const [label, key, cls] of [
+      ['←', 'Left', ''], ['↑', 'Up', ''], ['↓', 'Down', ''], ['→', 'Right', ''],
+      ['Esc', 'Escape', 'esc'], ['⏎', 'Enter', 'enter'],
+    ]) {
+      const b = el('button', cls ? `nav-key ${cls}` : 'nav-key', label);
+      b.dataset.key = b.title = key;
+      b.setAttribute('aria-label', key);
+      this.navKeys.append(b);
+    }
+    this.navBackBtn = el('button', 'icon-btn nav-toggle active nav-back', '123');
+    this.navBackBtn.title = 'Choices';
+    this.navBackBtn.setAttribute('aria-label', 'Choices');
+    this.navKeys.append(this.navBackBtn);
+    this.answers.append(this.choices, this.navToggleBtn, el('span', 'grow'), this.cmdBar, this.navKeys);
     this.answers.hidden = true;
     this.screen.append(this.hist, this.live, this.dock, this.cursor, this.ime, this.measure);
-    this.node.append(this.tab, this.screen, this.answers, this.chooser, this.toastEl);
+    this.node.append(this.tab, this.screen, this.answers, this.chooser, this.menuSlot, this.toastEl);
     this.screen.hidden = true;
     this.bind();
   }
@@ -479,8 +814,16 @@ class Pane {
       const word = e.target.closest('button')?.dataset.word;
       if (word) this.answerChoice(word);
     };
+    this.navToggleBtn.onclick = () => this.setNavMode(true);
+    this.navBackBtn.onclick = () => this.setNavMode(false);
+    this.navKeys.onclick = e => {
+      const key = e.target.closest('button')?.dataset.key;
+      if (!key) return;
+      this.sendNavKey(key);
+    };
     this.select.onchange = () => {
       if (this.select.value === RENAME) { this.select.value = this.room || ''; this.renameRoom(); return; }
+      if (this.select.value === MENU_OPTION) { this.deck.openMenu(this); return; }
       this.deck.openRoom(this.select.value, this);
     };
     this.smaller.onclick = () => this.setFont(this.fontSize() - 1);
@@ -490,6 +833,13 @@ class Pane {
     this.node.addEventListener('mousedown', () => this.deck.setActive(this));
     this.screen.addEventListener('mouseup', () => {
       if (window.getSelection().isCollapsed) this.focus(); else this.copySelection();
+    });
+    this.screen.addEventListener('copy', e => {
+      const text = this.selectedText();
+      if (!text || !e.clipboardData) return;
+      e.preventDefault();
+      e.clipboardData.setData('text/plain', text);
+      this.toast();
     });
   }
 
@@ -523,7 +873,8 @@ class Pane {
       const a = e.target.closest('a.u');
       if (a) {
         e.preventDefault();
-        const url = this.fullUrl(a);
+        if (!window.getSelection().isCollapsed) return;
+        const url = a.dataset.url || this.fullUrl(a);
         if (/^https?:\/\//.test(url)) window.open(url, '_blank', 'noopener');
         return;
       }
@@ -628,7 +979,15 @@ class Pane {
       r.selectNodeContents(ln);
       if (ln.contains(range.startContainer)) r.setStart(range.startContainer, range.startOffset);
       if (ln.contains(range.endContainer)) r.setEnd(range.endContainer, range.endOffset);
-      return { full: ln.textContent.trimEnd(), part: r.toString().trimEnd() };
+      const links = [...ln.querySelectorAll('a.u[data-url-group]')];
+      const firstA = links.find(a => a.dataset.urlCont === '1');
+      const lastA = links.length ? links[links.length - 1] : null;
+      return {
+        full: ln.textContent.trimEnd(),
+        part: r.toString().trimEnd(),
+        urlGroupStart: firstA ? firstA.dataset.urlGroup : null,
+        urlGroupEnd: (lastA && !trailingTextAfter(ln, lastA).trim()) ? lastA.dataset.urlGroup : null,
+      };
     });
     return joinSelectedLines(pieces, cols);
   }
@@ -700,6 +1059,8 @@ class Pane {
   }
 
   show(room, claim = true) {
+    this.wantedMenu = false;
+    this.dropMenu();
     if (room && claim) this.deck.claims.add(room);
     this.room = room;
     this.raw = [];
@@ -720,10 +1081,49 @@ class Pane {
     this.deck.changed();
   }
 
+  showMenu() {
+    for (const p of this.deck.panes) {
+      if (p !== this && p.isMenuPane) p.show(null, false);
+    }
+    this.wantedMenu = false;
+    this.room = null;
+    this.raw = [];
+    this.keys = [];
+    this.size = '';
+    this.menu = null;
+    this.clearHistory();
+    this.err.textContent = '';
+    this.cwd.textContent = '';
+    this.screen.hidden = true;
+    this.chooser.hidden = true;
+    this.isMenuPane = true;
+    this.node.classList.add('menu-pane');
+    const side = document.getElementById('side');
+    if (side) this.menuSlot.appendChild(side);
+    this.menuSlot.hidden = false;
+    this.syncCommands();
+    this.deck.changed();
+  }
+
+  dropMenu() {
+    if (!this.isMenuPane) return;
+    this.isMenuPane = false;
+    this.node.classList.remove('menu-pane');
+    this.menuSlot.hidden = true;
+    const side = document.getElementById('side');
+    const app = document.getElementById('app');
+    const resizer = document.getElementById('side-resizer');
+    if (side && app && side.parentElement === this.menuSlot) {
+      app.insertBefore(side, resizer || document.getElementById('panes'));
+    }
+  }
+
   fail(message) { this.err.textContent = message; }
 
   syncCommands() {
     this.answers.hidden = !this.room;
+    this.navToggleBtn.hidden = !this.room;
+    if (!this.room) this.setNavMode(false);
     this.cmdBar.textContent = '';
     for (const cmd of this.deck.commands || []) {
       const b = el('button', 'cmd-btn', cmd.label);
@@ -731,6 +1131,18 @@ class Pane {
       b.onclick = () => this.submit(cmd.text);
       this.cmdBar.appendChild(b);
     }
+  }
+
+  setNavMode(on) {
+    const active = Boolean(on && this.room);
+    this.answers.classList.toggle('nav-mode', active);
+    this.navKeys.hidden = !active;
+  }
+
+  sendNavKey(key) {
+    if (!this.room) return;
+    this.typed(key === 'Enter');
+    send(this, 'keys', key);
   }
 
   submit(text) {
@@ -793,6 +1205,9 @@ class Pane {
   render() {
     const dockStart = this.findDockStart();
     const dockCount = this.raw.length - dockStart;
+    let dirty = dockStart !== this.dockStart
+      || this.live.children.length !== dockStart
+      || this.dock.children.length !== dockCount;
     if (dockStart !== this.dockStart) {
       this.keys.length = Math.min(this.keys.length, dockStart, this.dockStart);
       this.dockStart = dockStart;
@@ -803,8 +1218,12 @@ class Pane {
     while (this.dock.children.length > dockCount) this.dock.lastChild.remove();
     this.dock.hidden = dockCount === 0;
     const agy = this.isAgy();
-    renderParsedLines(this.raw, { agy, agyLimit: dockStart, keys: this.keys, getLine: i => this.lineAt(i) });
+    dirty = renderParsedLines(this.raw, { agy, agyLimit: dockStart, keys: this.keys, getLine: i => this.lineAt(i) }) || dirty;
     this.keys.length = this.raw.length;
+    if (dirty) {
+      linkifyContainer(this.live, this.cols || 0);
+      if (dockCount > 0) linkifyContainer(this.dock, this.cols || 0);
+    }
     if (agy) this.applyNoiseFoldsTo(this.live);
     this.syncMenuMarks();
   }
@@ -981,19 +1400,23 @@ class Pane {
   }
 
   fullUrl(a) {
+    if (a.dataset && a.dataset.url) return a.dataset.url;
     let url = a.textContent;
     let line = a.closest('.ln');
-    const lines = [...a.closest('.live, .hist, .dock').children];
+    const container = a.closest('.live, .hist, .dock');
+    const lines = [...container.children];
     let index = lines.indexOf(line);
-    let tail = line.textContent.slice(line.textContent.lastIndexOf(url) + url.length);
-    while (!tail.trim() && textWidth(line.textContent.trimEnd()) >= (this.cols || 0) && index + 1 < lines.length) {
-      const next = lines[++index].textContent.match(/^\S+/);
-      if (!next) break;
-      url += next[0];
-      line = lines[index];
-      tail = line.textContent.slice(next[0].length);
+    if (trailingTextAfter(line, a).trim()) return trimUrlEnd(url);
+    while (index + 1 < lines.length) {
+      const prevFull = (line.textContent || '').trimEnd();
+      const nextFull = (lines[index + 1].textContent || '').trimEnd();
+      const cont = urlContinuation(prevFull, url, nextFull, this.cols || 0, 0);
+      if (!cont) break;
+      url += cont.raw;
+      line = lines[++index];
+      if (cont.indent + cont.raw.length < nextFull.length) break;
     }
-    return url;
+    return trimUrlEnd(url);
   }
 
   onWheel(e) {
@@ -1053,6 +1476,7 @@ class Pane {
           },
         });
         this.histLines = data.lines.length;
+        linkifyContainer(this.hist, this.cols || 0);
         if (agy) this.applyNoiseFoldsTo(this.hist);
         this.histAllFrame = (data.lines.length < want || want >= HISTORY_MAX) ? seq : -1;
         if (data.lines.length) this.screen.scrollTop = Math.max(0, this.screen.scrollHeight - fromBottom + deltaPx);
@@ -1111,6 +1535,7 @@ class Pane {
     const holders = new Map();
     for (const p of d.panes.filter(p => p !== this)) {
       if (p.room) holders.set(`r:${p.room}`, p);
+      if (p.isMenuPane) holders.set('m:menu', p);
     }
     const section = title => this.chooser.appendChild(el('div', 'sec-title', title));
     const item = (key, state, name, label, open) => {
@@ -1125,6 +1550,8 @@ class Pane {
       };
       this.chooser.appendChild(b);
     };
+    section('MENU');
+    item('m:menu', '', 'Menu', 'Rooms / Agent Status / Settings', () => this.showMenu());
     const byName = Object.fromEntries(d.rooms.map(r => [r.name, r]));
     const order = [byName.main, byName.watch, ...d.rooms.filter(r => r.room && r.name !== 'main' && r.name !== 'watch'),
       ...d.rooms.filter(r => !r.room)].filter(Boolean);
@@ -1263,9 +1690,10 @@ const deck = {
         return;
       }
       for (const p of this.panes) {
-        p.show(p.wanted && names.has(p.wanted) ? p.wanted : null, false);
+        if (p.wantedMenu) p.showMenu();
+        else p.show(p.wanted && names.has(p.wanted) ? p.wanted : null, false);
       }
-      if (this.panes.length === 1 && !this.panes[0].room && names.has('main')) this.panes[0].show('main', false);
+      if (this.panes.length === 1 && !this.panes[0].isMenuPane && !this.panes[0].room && names.has('main')) this.panes[0].show('main', false);
     });
     window.addEventListener('focus', () => {
       if (this.active) this.active.refit();
@@ -1289,6 +1717,7 @@ const deck = {
       if (node && node.dir && node.a && node.b) return { dir: node.dir, a: build(node.a), b: build(node.b) };
       const pane = new Pane(this);
       pane.wanted = node && node.room;
+      pane.wantedMenu = Boolean(node && node.menu);
       return { pane };
     };
     const saved = store.get(`win:${slot}`, null);
@@ -1298,7 +1727,10 @@ const deck = {
   },
 
   serialize(node) {
-    if (node.pane) return { room: node.pane.room };
+    if (node.pane) {
+      if (node.pane.isMenuPane || node.pane.wantedMenu) return { menu: true };
+      return { room: node.pane.room };
+    }
     return { dir: node.dir, a: this.serialize(node.a), b: this.serialize(node.b) };
   },
 
@@ -1380,7 +1812,7 @@ const deck = {
   targetPane(pane) {
     if (pane) return pane;
     if (isMobile() || FORCE_EMBED) return this.active;
-    const isEmpty = p => !p.room;
+    const isEmpty = p => !p.room && !p.isMenuPane;
     if (this.active && isEmpty(this.active)) return this.active;
     const empty = this.panes.find(isEmpty);
     if (empty) return empty;
@@ -1389,7 +1821,15 @@ const deck = {
     return this.split(base, side);
   },
 
+  menuTargetPane() {
+    if (!isMobile() && this.active && this.active.isMenuPane && this.panes.length > 1) {
+      return this.panes.find(p => !p.isMenuPane) || this.active;
+    }
+    return this.active;
+  },
+
   removePane(pane) {
+    pane.dropMenu();
     if (this.panes.length === 1) { pane.show(null); return; }
     const leaf = this.leafOf(pane);
     const { parent } = this.findParent(leaf);
@@ -1484,12 +1924,62 @@ const deck = {
         this.commands = nextCmds;
         for (const p of this.panes) p.syncCommands();
       }
+      this.checkAttentionSound();
       this.renderRooms();
     } catch { /* keep the last list */ }
   },
 
+  playChime() {
+    if (!store.get('sound', true)) return;
+    const now = Date.now();
+    if (this._lastChimeAt && now - this._lastChimeAt < 5000) return;
+    this._lastChimeAt = now;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      if (!this._audioCtx) this._audioCtx = new Ctx();
+      const ctx = this._audioCtx;
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      const t = ctx.currentTime;
+      for (const [freq, dt, dur] of [[587.33, 0, 0.14], [880, 0.11, 0.18]]) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, t + dt);
+        gain.gain.setValueAtTime(0.0001, t + dt);
+        gain.gain.exponentialRampToValueAtTime(0.08, t + dt + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + dt + dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(t + dt);
+        osc.stop(t + dt + dur + 0.02);
+      }
+    } catch { /* audio unavailable */ }
+  },
+
+  checkAttentionSound() {
+    const states = new Map(this.rooms.map(r => [r.name, r.state]));
+    if (this._prevRoomStates) {
+      let chime = false;
+      for (const [name, st] of states) {
+        const prev = this._prevRoomStates.get(name);
+        if (st === 'approval' && prev !== 'approval') chime = true;
+        if (name === 'main' && prev === 'working' && st === 'input') chime = true;
+      }
+      if (chime) this.playChime();
+    }
+    this._prevRoomStates = states;
+  },
+
   reloadPage() {
     location.reload();
+  },
+
+  openMenu(pane) {
+    const target = pane || this.active;
+    if (!target) return;
+    target.showMenu();
+    this.setActive(target);
   },
 
   openRoom(name, pane) {
@@ -1527,7 +2017,7 @@ const deck = {
       dot.title = STATE_LABELS[r.state] || r.state || '';
       const labelText = r.label ? `${r.name}  ${r.label}` : r.name;
       item.append(dot, el('span', 'n', labelText), el('span', 's', r.client || ''));
-      item.onclick = () => this.openRoom(r.name, this.targetPane());
+      item.onclick = () => this.openRoom(r.name, this.menuTargetPane());
       view.appendChild(item);
     }
     const addBtn = el('button', 'add-room', '＋ New room');
@@ -1542,17 +2032,20 @@ const deck = {
     this.renderRoomView(shown);
     for (const p of this.panes) {
       p.select.textContent = '';
-      if (!p.room) { const o = el('option', '', '—'); o.value = ''; p.select.appendChild(o); }
+      if (!p.room && !p.isMenuPane) { const o = el('option', '', '—'); o.value = ''; p.select.appendChild(o); }
+      const menuOpt = el('option', '', 'Menu');
+      menuOpt.value = MENU_OPTION;
+      p.select.appendChild(menuOpt);
       for (const r of this.rooms) {
         const o = el('option', '', `${r.name}${r.label ? ' ' + r.label : ''}`);
         o.value = r.name;
         p.select.appendChild(o);
       }
       if (p.room) { const o = el('option', '', 'Rename…'); o.value = RENAME; p.select.appendChild(o); }
-      p.select.value = p.room || '';
+      p.select.value = p.isMenuPane ? MENU_OPTION : (p.room || '');
       const state = p.room ? byName[p.room]?.state : '';
       p.stateDot.className = state ? `dot state-dot on state-${state}` : 'dot state-dot';
-      if (!p.room) p.renderChooser();
+      if (!p.room && !p.isMenuPane) p.renderChooser();
     }
   },
 
@@ -1641,6 +2134,21 @@ const deck = {
       show();
       for (const p of this.panes) { if (p.room) p.applyFont(); }
     });
+    const soundBtn = document.getElementById('sound-toggle');
+    if (soundBtn) {
+      const syncSound = () => {
+        const on = store.get('sound', true);
+        soundBtn.textContent = on ? '🔔' : '🔕';
+        soundBtn.title = on ? 'Attention sound ON' : 'Attention sound OFF';
+      };
+      syncSound();
+      soundBtn.onclick = () => {
+        const next = !store.get('sound', true);
+        store.set('sound', next);
+        syncSound();
+        if (next) { this._lastChimeAt = 0; this.playChime(); }
+      };
+    }
     const pick = document.getElementById('theme-select');
     for (const [name, t] of Object.entries(THEMES)) { const o = el('option', '', t.label); o.value = name; pick.appendChild(o); }
     pick.value = currentTheme();

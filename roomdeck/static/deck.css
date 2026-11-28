@@ -97,6 +97,9 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .answers .choices { display: contents; }
 .answers .grow { flex: 1; }
 .answers .cmd-btn { font-size: 12px; }
+.answers .icon-btn { display: inline-flex; align-items: center; justify-content: center; align-self: stretch; }
+.answers .icon-btn svg { width: 13px; height: 13px; }
+.answers .icon-btn.nav-toggle, .answers .nav-keys { display: none; }
 .pane.inactive .screen { filter: var(--inactive-filter, brightness(.72)); background: var(--inactive-bg, transparent); }
 .tab { flex: none; display: flex; gap: 6px; align-items: center; padding: 3px 6px; background: var(--frame); font-size: 13px; white-space: nowrap; overflow: hidden; }
 .tab .room-select { flex: 0 1 auto; min-width: 56px; max-width: 45%; }
@@ -128,6 +131,9 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .screen .ime.composing { width: auto; min-width: 2px; background: var(--bg); }
 .screen .measure { position: absolute; top: 0; left: 0; visibility: hidden; white-space: pre; }
 .screen ::selection { background: var(--sel-bg); color: var(--sel-fg); }
+.menu-slot { flex: 1; min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.pane.menu-pane .menu-slot #side { width: 100%; height: 100%; flex: 1; min-width: 0; min-height: 0; }
+.pane.menu-pane .tab .close-btn, .pane.menu-pane .tab .fs-group, .pane.menu-pane .tab .state-dot { display: none; }
 #view { flex: none; height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--muted); }
 #view button { height: 18px; min-width: 18px; padding: 0 6px; line-height: 16px; }
 #view #fs-base { min-width: 2.2em; text-align: center; font-variant-numeric: tabular-nums; color: var(--fg); }
@@ -148,7 +154,22 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
 #dir-list button { text-align: left; border: 0; background: transparent; }
 #dir-path { font-family: var(--font); font-size: 12px; color: var(--muted); word-break: break-all; }
 .mobile-mode #app { flex-direction: column; }
-.mobile-mode #side, .mobile-mode #side-resizer, .mobile-mode .sec-resizer { display: none; }
+.mobile-mode #app > #side, .mobile-mode #side-resizer, .mobile-mode .sec-resizer { display: none; }
+.mobile-mode .pane.menu-pane .tab .room-select { padding-left: 12px; }
+.mobile-mode .pane.menu-pane #side { display: flex; width: 100%; font-size: 13.5px; line-height: 21px; overflow-y: auto; }
+.mobile-mode .pane.menu-pane #side > .sec { padding: 10px 14px; }
+.mobile-mode .pane.menu-pane .sec-title { font-size: 10.5px; margin-bottom: 6px; }
+.mobile-mode .pane.menu-pane #usage { height: auto; max-height: 220px; }
+.mobile-mode .pane.menu-pane #usage .acct { height: 22px; font-size: 13.5px; }
+.mobile-mode .pane.menu-pane #usage .win { height: 22px; }
+.mobile-mode .pane.menu-pane #middle { flex: 1 0 auto; min-height: 220px; padding: 8px 14px 12px; gap: 10px; }
+.mobile-mode .pane.menu-pane .view { gap: 6px; overflow-y: visible; }
+.mobile-mode .pane.menu-pane .view .item { font-size: 14.5px; line-height: 1.5; padding: 7px 6px; gap: 8px; }
+.mobile-mode .pane.menu-pane .view .item .s { font-size: 12.5px; }
+.mobile-mode .pane.menu-pane #load .row, .mobile-mode .pane.menu-pane #load .mrow { min-height: 24px; height: auto; }
+.mobile-mode .pane.menu-pane #view { height: 48px; padding: 0 14px; gap: 10px; }
+.mobile-mode .pane.menu-pane #view button { height: 34px; min-width: 38px; padding: 0 10px; font-size: 16px; }
+.mobile-mode .pane.menu-pane #view select { height: 34px; padding: 0 10px; font-size: 13.5px; }
 .mobile-mode .pane.inactive, .mobile-mode .divider, .mobile-mode .split:not(:has(.pane:not(.inactive))) { display: none; }
 .mobile-mode .tab { position: relative; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
 .mobile-mode .tab .menu, .mobile-mode .tab .cwd, .mobile-mode .tab .split-btn, .mobile-mode .tab .hide-btn, .mobile-mode .tab .close-btn { display: none; }
@@ -161,5 +182,15 @@ dialog .row { display: flex; gap: 8px; justify-content: flex-end; }
 .mobile-mode .answers { gap: 5px; padding: 6px; }
 .mobile-mode .answers button { flex: auto; min-width: 0; height: 46px; padding: 0 4px; border-radius: 8px; font-size: 16px; }
 .mobile-mode .answers .sep, .mobile-mode .answers .grow { display: none; }
+.mobile-mode .answers .icon-btn { flex: none; width: 46px; }
+.mobile-mode .answers .icon-btn svg { width: 17px; height: 17px; }
+.mobile-mode .answers .nav-toggle { display: inline-flex; border-color: var(--accent); color: color-mix(in srgb, var(--accent) 45%, var(--fg)); background: color-mix(in srgb, var(--accent) 16%, var(--bg)); }
+.mobile-mode .answers.nav-mode .choices,
+.mobile-mode .answers.nav-mode > .icon-btn { display: none; }
+.mobile-mode .answers.nav-mode .nav-keys { display: contents; }
+.mobile-mode .answers .nav-key { flex: 1 1 0; min-width: 0; font-family: var(--font); font-weight: 600; }
+.mobile-mode .answers .nav-key.esc { color: var(--c9); border-color: color-mix(in srgb, var(--danger) 45%, var(--bg)); }
+.mobile-mode .answers .nav-key.enter { background: color-mix(in srgb, var(--accent) 22%, var(--bg)); border-color: var(--accent); color: var(--accent-fg, #fff); }
+.mobile-mode .answers .nav-back.active { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #fff); font-weight: 700; }
 .embed-mode #side, .embed-mode #side-resizer, .embed-mode .sec-resizer { display: none; }
 .embed-mode .tab .menu, .embed-mode .tab .split-btn, .embed-mode .tab .hide-btn { display: none; }
